@@ -12,6 +12,7 @@ import (
 	"net/mail"
 	"net/textproto"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
@@ -431,6 +432,8 @@ func (email *Email) SetBody(contentType contentType, body string) *Email {
 
 // AddHeader adds the given "header" with the passed "value".
 func (email *Email) AddHeader(header string, values ...string) *Email {
+
+	header = textproto.CanonicalMIMEHeaderKey(header)
 	if email.Error != nil {
 		return email
 	}
@@ -943,7 +946,8 @@ func send(from string, to []string, msg string, email *Email, client *SMTPClient
 }
 
 func sendMailProcess(from string, to []string, msg string, email *Email, c *smtpClient) error {
-	size := string(len(msg))
+	size := strconv.Itoa(len(msg))
+
 	if email.headers.Get("Message-ID") != "" {
 		// Set the sender
 		if err := c.mail(from, email.headers.Get("Message-ID"), size); err != nil {
