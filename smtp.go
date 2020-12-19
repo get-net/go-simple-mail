@@ -4,10 +4,11 @@
 
 // Package mail implements the Simple Mail Transfer Protocol as defined in RFC 5321.
 // It also implements the following extensions:
-//	8BITMIME  RFC 1652
-//	SMTPUTF8  RFC 6531
-//	AUTH      RFC 2554
-//	STARTTLS  RFC 3207
+//	8BITMIME   RFC 1652
+//	SMTPUTF8   RFC 6531
+//	AUTH       RFC 2554
+//	STARTTLS   RFC 3207
+//  CHECKPOINT RFC 1845
 // Additional extensions may be handled by clients using smtp.go in golang source code or pull request Go Simple Mail
 
 // smtp.go file is a modification of smtp golang package what is frozen and is not accepting new features.
@@ -23,6 +24,7 @@ import (
 	"net"
 	"net/textproto"
 	"strings"
+	"time"
 )
 
 // A Client represents a client connection to an SMTP server.
@@ -206,7 +208,7 @@ func (c *smtpClient) authenticate(a auth) error {
 // If the server supports the SMTPUTF8 extension, Mail adds the
 // SMTPUTF8 parameter.
 // This initiates a mail transaction and is followed by one or more Rcpt calls.
-func (c *smtpClient) mail(from string) error {
+func (c *smtpClient) mail(from string, args ...interface{}) error {
 	if err := validateLine(from); err != nil {
 		return err
 	}
@@ -215,6 +217,14 @@ func (c *smtpClient) mail(from string) error {
 	}
 	cmdStr := "MAIL FROM:<%s>"
 	if c.ext != nil {
+		if _, ok := c.ext["CHECKPOINT"]; ok {
+			cmdStr += " TRANSID=<%s>"
+			if len(args) == 0 {
+				domain := strings.Split(from, "@")
+				transid := fmt.Sprintf("%d@%s", time.Now().Unix(), domain[1])
+				args = []interface{}{transid}
+			}
+		}
 		if _, ok := c.ext["8BITMIME"]; ok {
 			cmdStr += " BODY=8BITMIME"
 		}
@@ -222,7 +232,8 @@ func (c *smtpClient) mail(from string) error {
 			cmdStr += " SMTPUTF8"
 		}
 	}
-	_, _, err := c.cmd(250, cmdStr, from)
+	args = append([]interface{}{from}, args...)
+	_, _, err := c.cmd(250, cmdStr, args...)
 	return err
 }
 

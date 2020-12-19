@@ -748,7 +748,7 @@ func (email *Email) SendEnvelopeFrom(from string, client *SMTPClient) error {
 
 	msg := email.GetMessage()
 
-	return send(from, email.recipients, msg, client)
+	return send(from, email.recipients, msg, email, client)
 }
 
 // dial connects to the smtp server with the request encryption type
@@ -904,7 +904,7 @@ func (smtpClient *SMTPClient) Close() error {
 }
 
 // send does the low level sending of the email
-func send(from string, to []string, msg string, client *SMTPClient) error {
+func send(from string, to []string, msg string, email *Email, client *SMTPClient) error {
 	//Check if client struct is not nil
 	if client != nil {
 
@@ -916,14 +916,14 @@ func send(from string, to []string, msg string, client *SMTPClient) error {
 			if client.SendTimeout != 0 {
 				smtpSendChannel = make(chan error, 1)
 
-				go func(from string, to []string, msg string, c *smtpClient) {
-					smtpSendChannel <- sendMailProcess(from, to, msg, c)
-				}(from, to, msg, client.Client)
+				go func(from string, to []string, msg string, email *Email, c *smtpClient) {
+					smtpSendChannel <- sendMailProcess(from, to, msg, email, c)
+				}(from, to, msg, email, client.Client)
 			}
 
 			if client.SendTimeout == 0 {
 				// no SendTimeout, just fire the sendMailProcess
-				return sendMailProcess(from, to, msg, client.Client)
+				return sendMailProcess(from, to, msg, email, client.Client)
 			}
 
 			// get the send result or timeout result, which ever happens first
@@ -942,10 +942,17 @@ func send(from string, to []string, msg string, client *SMTPClient) error {
 	return errors.New("Mail Error: No SMTP Client Provided")
 }
 
-func sendMailProcess(from string, to []string, msg string, c *smtpClient) error {
-	// Set the sender
-	if err := c.mail(from); err != nil {
-		return err
+func sendMailProcess(from string, to []string, msg string, email *Email, c *smtpClient) error {
+	if email.headers.Get("Message-ID") != "" {
+		// Set the sender
+		if err := c.mail(from, email.headers.Get("Message-ID")); err != nil {
+			return err
+		}
+	} else {
+		// Set the sender
+		if err := c.mail(from); err != nil {
+			return err
+		}
 	}
 
 	// Set the recipients

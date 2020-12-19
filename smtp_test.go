@@ -210,7 +210,7 @@ func TestBasic(t *testing.T) {
 		t.Fatalf("Shouldn't support DSN")
 	}
 
-	if err := c.mail("user@gmail.com"); err == nil {
+	if err := c.mail("user@gmail.com", "test.user@gmail.com"); err == nil {
 		t.Fatalf("MAIL should require authentication")
 	}
 
@@ -237,7 +237,7 @@ func TestBasic(t *testing.T) {
 	if err := c.mail("user@gmail.com>\r\nDATA\r\nAnother injected message body\r\n.\r\nQUIT\r\n"); err == nil {
 		t.Fatalf("MAIL should have failed due to a message injection attempt")
 	}
-	if err := c.mail("user@gmail.com"); err != nil {
+	if err := c.mail("user@gmail.com", "test.user@gmail.com"); err != nil {
 		t.Fatalf("MAIL failed: %s", err)
 	}
 	if err := c.rcpt("golang-nuts@googlegroups.com"); err != nil {
@@ -277,6 +277,7 @@ var basicServer = `250 mx.google.com at your service
 250-mx.google.com at your service
 250-SIZE 35651584
 250-AUTH LOGIN PLAIN
+250-CHECKPOINT
 250 8BITMIME
 530 Authentication required
 252 Send some mail, I'll try my best
@@ -292,11 +293,11 @@ var basicServer = `250 mx.google.com at your service
 var basicClient = `HELO localhost
 EHLO localhost
 EHLO localhost
-MAIL FROM:<user@gmail.com> BODY=8BITMIME
+MAIL FROM:<user@gmail.com> TRANSID=<test.user@gmail.com> BODY=8BITMIME
 VRFY user1@gmail.com
 VRFY user2@gmail.com
 AUTH PLAIN AHVzZXIAcGFzcw==
-MAIL FROM:<user@gmail.com> BODY=8BITMIME
+MAIL FROM:<user@gmail.com> TRANSID=<test.user@gmail.com> BODY=8BITMIME
 RCPT TO:<golang-nuts@googlegroups.com>
 DATA
 From: user@gmail.com
