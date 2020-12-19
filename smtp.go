@@ -9,6 +9,7 @@
 //	AUTH       RFC 2554
 //	STARTTLS   RFC 3207
 //  CHECKPOINT RFC 1845
+//  SIZE       RFC 1870
 // Additional extensions may be handled by clients using smtp.go in golang source code or pull request Go Simple Mail
 
 // smtp.go file is a modification of smtp golang package what is frozen and is not accepting new features.
@@ -224,6 +225,9 @@ func (c *smtpClient) mail(from string, args ...interface{}) error {
 				transid := fmt.Sprintf("%d@%s", time.Now().Unix(), domain[1])
 				args = []interface{}{transid}
 			}
+		}
+		if _, ok := c.ext["SIZE"]; ok {
+			cmdStr += " SIZE=%s"
 		}
 		if _, ok := c.ext["8BITMIME"]; ok {
 			cmdStr += " BODY=8BITMIME"

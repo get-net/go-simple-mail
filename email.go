@@ -943,14 +943,15 @@ func send(from string, to []string, msg string, email *Email, client *SMTPClient
 }
 
 func sendMailProcess(from string, to []string, msg string, email *Email, c *smtpClient) error {
+	size := len(msg)
 	if email.headers.Get("Message-ID") != "" {
 		// Set the sender
-		if err := c.mail(from, email.headers.Get("Message-ID")); err != nil {
+		if err := c.mail(from, email.headers.Get("Message-ID"), size); err != nil {
 			return err
 		}
 	} else {
 		// Set the sender
-		if err := c.mail(from); err != nil {
+		if err := c.mail(from, size); err != nil {
 			return err
 		}
 	}

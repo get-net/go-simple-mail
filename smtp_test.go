@@ -210,7 +210,7 @@ func TestBasic(t *testing.T) {
 		t.Fatalf("Shouldn't support DSN")
 	}
 
-	if err := c.mail("user@gmail.com", "test.user@gmail.com"); err == nil {
+	if err := c.mail("user@gmail.com", "test.user@gmail.com", "200"); err == nil {
 		t.Fatalf("MAIL should require authentication")
 	}
 
@@ -237,7 +237,7 @@ func TestBasic(t *testing.T) {
 	if err := c.mail("user@gmail.com>\r\nDATA\r\nAnother injected message body\r\n.\r\nQUIT\r\n"); err == nil {
 		t.Fatalf("MAIL should have failed due to a message injection attempt")
 	}
-	if err := c.mail("user@gmail.com", "test.user@gmail.com"); err != nil {
+	if err := c.mail("user@gmail.com", "test.user@gmail.com", "200"); err != nil {
 		t.Fatalf("MAIL failed: %s", err)
 	}
 	if err := c.rcpt("golang-nuts@googlegroups.com"); err != nil {
@@ -293,11 +293,11 @@ var basicServer = `250 mx.google.com at your service
 var basicClient = `HELO localhost
 EHLO localhost
 EHLO localhost
-MAIL FROM:<user@gmail.com> TRANSID=<test.user@gmail.com> BODY=8BITMIME
+MAIL FROM:<user@gmail.com> TRANSID=<test.user@gmail.com> SIZE=200 BODY=8BITMIME
 VRFY user1@gmail.com
 VRFY user2@gmail.com
 AUTH PLAIN AHVzZXIAcGFzcw==
-MAIL FROM:<user@gmail.com> TRANSID=<test.user@gmail.com> BODY=8BITMIME
+MAIL FROM:<user@gmail.com> TRANSID=<test.user@gmail.com> SIZE=200 BODY=8BITMIME
 RCPT TO:<golang-nuts@googlegroups.com>
 DATA
 From: user@gmail.com
@@ -367,7 +367,7 @@ QUIT
 `
 
 			basicClient = `EHLO localhost
-MAIL FROM:<user@gmail.com>
+MAIL FROM:<user@gmail.com> SIZE=300
 QUIT
 `
 		)
@@ -383,7 +383,7 @@ QUIT
 		if ok, _ := c.extension("SMTPUTF8"); ok {
 			t.Fatalf("Shouldn't support SMTPUTF8")
 		}
-		if err := c.mail("user@gmail.com"); err != nil {
+		if err := c.mail("user@gmail.com", "300"); err != nil {
 			t.Fatalf("MAIL FROM failed: %s", err)
 		}
 		if err := c.quit(); err != nil {
@@ -408,7 +408,7 @@ QUIT
 `
 
 			basicClient = `EHLO localhost
-MAIL FROM:<user@gmail.com> BODY=8BITMIME
+MAIL FROM:<user@gmail.com> SIZE=300 BODY=8BITMIME
 QUIT
 `
 		)
@@ -424,7 +424,7 @@ QUIT
 		if ok, _ := c.extension("SMTPUTF8"); ok {
 			t.Fatalf("Shouldn't support SMTPUTF8")
 		}
-		if err := c.mail("user@gmail.com"); err != nil {
+		if err := c.mail("user@gmail.com", "300"); err != nil {
 			t.Fatalf("MAIL FROM failed: %s", err)
 		}
 		if err := c.quit(); err != nil {
@@ -449,7 +449,7 @@ QUIT
 `
 
 			basicClient = `EHLO localhost
-MAIL FROM:<user+📧@gmail.com> SMTPUTF8
+MAIL FROM:<user+📧@gmail.com> SIZE=300 SMTPUTF8
 QUIT
 `
 		)
@@ -465,7 +465,7 @@ QUIT
 		if ok, _ := c.extension("SMTPUTF8"); !ok {
 			t.Fatalf("Should support SMTPUTF8")
 		}
-		if err := c.mail("user+📧@gmail.com"); err != nil {
+		if err := c.mail("user+📧@gmail.com", "300"); err != nil {
 			t.Fatalf("MAIL FROM failed: %s", err)
 		}
 		if err := c.quit(); err != nil {
@@ -491,7 +491,7 @@ QUIT
 	`
 
 			basicClient = `EHLO localhost
-MAIL FROM:<user+📧@gmail.com> BODY=8BITMIME SMTPUTF8
+MAIL FROM:<user+📧@gmail.com> SIZE=300 BODY=8BITMIME SMTPUTF8
 QUIT
 `
 		)
@@ -508,7 +508,7 @@ QUIT
 		if ok, _ := c.extension("SMTPUTF8"); !ok {
 			t.Fatalf("Should support SMTPUTF8")
 		}
-		if err := c.mail("user+📧@gmail.com"); err != nil {
+		if err := c.mail("user+📧@gmail.com", "300"); err != nil {
 			t.Fatalf("MAIL FROM failed: %s", err)
 		}
 		if err := c.quit(); err != nil {
