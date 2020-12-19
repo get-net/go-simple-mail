@@ -948,9 +948,11 @@ func send(from string, to []string, msg string, email *Email, client *SMTPClient
 func sendMailProcess(from string, to []string, msg string, email *Email, c *smtpClient) error {
 	size := strconv.Itoa(len(msg))
 
+	fmt.Printf("%+v\n", email.headers)
 	if email.headers.Get("Message-ID") != "" {
 		// Set the sender
-		if err := c.mail(from, email.headers.Get("Message-ID"), size); err != nil {
+		if err := c.mail(from, email.headers.Get("Message-ID"), size,
+			email.headers.Get("X-Tax-FlowTypeCode")); err != nil {
 			return err
 		}
 	} else {

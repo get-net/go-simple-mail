@@ -10,6 +10,8 @@
 //	STARTTLS   RFC 3207
 //  CHECKPOINT RFC 1845
 //  SIZE       RFC 1870
+//  BINARYMIME RFC 3030
+//  Russian FNS Extension
 // Additional extensions may be handled by clients using smtp.go in golang source code or pull request Go Simple Mail
 
 // smtp.go file is a modification of smtp golang package what is frozen and is not accepting new features.
@@ -228,6 +230,12 @@ func (c *smtpClient) mail(from string, args ...interface{}) error {
 		}
 		if _, ok := c.ext["SIZE"]; ok {
 			cmdStr += " SIZE=%s"
+		}
+		if _, ok := c.ext["XTAXFTC"]; ok {
+			cmdStr += " XTAXFTC=%s"
+		}
+		if _, ok := c.ext["BINARYMIME"]; ok {
+			cmdStr += " BODY=BINARYMIME"
 		}
 		if _, ok := c.ext["8BITMIME"]; ok {
 			cmdStr += " BODY=8BITMIME"
