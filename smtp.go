@@ -11,6 +11,7 @@
 //  CHECKPOINT RFC 1845
 //  SIZE       RFC 1870
 //  BINARYMIME RFC 3030
+//  CHUNKING   RFC 3030
 //  Russian FNS Extension
 // Additional extensions may be handled by clients using smtp.go in golang source code or pull request Go Simple Mail
 
@@ -281,6 +282,27 @@ func (c *smtpClient) data() (io.WriteCloser, error) {
 		return nil, err
 	}
 	return &dataCloser{c, c.text.DotWriter()}, nil
+}
+
+// bdat issues a BDAT command with chunk size write data to the server
+// and returns a write that can be used to write the mail headers and body.
+// The caller should send bdat with size 0 this close send message before
+// calling any more methods in c. A call to Bdat must be preceded by one
+// or more call to Rcpt.
+func (c *smtpClient) bdat(size int) (io.Writer, error) {
+
+	var err error
+	if size == 0 {
+		_, _, err = c.cmd(250, "BDAT %d LAST", size)
+	} else {
+		_, err = fmt.Fprintf(c.text.W, "BDAT %d\r\n", size)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return c.text.W, nil
 }
 
 // extension reports whether an extension is support by the server.

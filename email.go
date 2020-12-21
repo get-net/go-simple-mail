@@ -726,6 +726,7 @@ func (email *Email) GetMessage() string {
 		msg.closeMultipart()
 	}
 
+	msg.headers.Add("Content-Length", strconv.Itoa(msg.body.Len()))
 	return msg.getHeaders() + msg.body.String()
 }
 
@@ -948,7 +949,6 @@ func send(from string, to []string, msg string, email *Email, client *SMTPClient
 func sendMailProcess(from string, to []string, msg string, email *Email, c *smtpClient) error {
 	size := strconv.Itoa(len(msg))
 
-	fmt.Printf("%+v\n", email.headers)
 	if email.headers.Get("Message-ID") != "" {
 		// Set the sender
 		if err := c.mail(from, email.headers.Get("Message-ID"), size,
@@ -969,21 +969,32 @@ func sendMailProcess(from string, to []string, msg string, email *Email, c *smtp
 		}
 	}
 
-	// Send the data command
-	w, err := c.data()
-	if err != nil {
-		return err
-	}
+	if _, ok := c.ext["CHUNKING"]; ok {
+		w, err := c.bdat(len(msg))
+		// write the message
+		_, err = fmt.Fprint(w, msg)
+		if err != nil {
+			return err
+		}
 
-	// write the message
-	_, err = fmt.Fprint(w, msg)
-	if err != nil {
-		return err
-	}
-
-	err = w.Close()
-	if err != nil {
-		return err
+		if _, ok := c.ext["CHUNKING"]; ok {
+			w, err = c.bdat(0)
+			if err != nil {
+				return err
+			}
+		}
+	} else {
+		// Send the data command
+		w, err := c.data()
+		// write the message
+		_, err = fmt.Fprint(w, msg)
+		if err != nil {
+			return err
+		}
+		err = w.Close()
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
