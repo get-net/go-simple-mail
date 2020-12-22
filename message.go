@@ -3,6 +3,8 @@ package mail
 import (
 	"bytes"
 	"encoding/base64"
+	"golang.org/x/net/html/charset"
+	"golang.org/x/text/transform"
 	"io"
 	"mime/multipart"
 	"mime/quotedprintable"
@@ -32,24 +34,32 @@ func newMessage(email *Email) *message {
 		encoding: email.Encoding}
 }
 
-func encodeHeader(text string, charset string, usedChars int) string {
+func encodeHeader(text string, Charset string, usedChars int) string {
+	var encBytes []byte
+	var err error
 	// create buffer
 	buf := new(bytes.Buffer)
+	if Charset != "UTF-8" {
+		// if chaset not UTF-8
+		e, _ := charset.Lookup(Charset)
+		if e == nil {
+			return ""
+		}
+		encBytes, _, err = transform.Bytes(e.NewEncoder(), []byte(text))
+		if err != nil {
+			return ""
+		}
+	} else {
+		encBytes = []byte(text)
+	}
 
 	// encode
-	encoder := newEncoder(buf, charset, usedChars)
-	encoder.encode([]byte(text))
+	encoder := newEncoder(buf, Charset, usedChars)
+
+	// change
+	encoder.encode(encBytes)
 
 	return buf.String()
-
-	/*
-			switch encoding {
-			case EncodingBase64:
-				return mime.BEncoding.Encode(charset, text)
-			default:
-				return mime.QEncoding.Encode(charset, text)
-		}
-	*/
 }
 
 // getHeaders returns the message headers
