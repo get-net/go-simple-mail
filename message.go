@@ -165,7 +165,7 @@ func qpEncode(text []byte) []byte {
 	return buf.Bytes()
 }
 
-const maxLineChars = 76
+const maxLineChars = 150
 
 type base64LineWrap struct {
 	writer       io.Writer
