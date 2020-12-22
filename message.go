@@ -240,7 +240,7 @@ func (msg *message) addFiles(files []*file, inline bool) {
 			header.Set("Content-Disposition", "inline; filename=\""+encodeHeader(escapeQuotes(file.filename), msg.charset, 10)+`"`)
 			header.Set("Content-ID", "<"+msg.getCID(file.filename)+">")
 		} else {
-			header.Set("Content-Disposition", "attachment; tfilename=\""+encodeHeader(escapeQuotes(file.filename), msg.charset, 10)+`"`)
+			header.Set("Content-Disposition", "attachment; filename=\""+encodeHeader(escapeQuotes(file.filename), msg.charset, 10)+`"`)
 		}
 
 		msg.write(header, file.data, encoding)
