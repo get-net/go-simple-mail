@@ -34,7 +34,7 @@ func (e *encoder) encode(p []byte) (n int, err error) {
 
 	// some lines we encode end in "
 	//maxLineLength := 75 - 1
-	maxLineLength := 76
+	maxLineLength := 150
 
 	// prevent header injection
 	p = secureHeader(p)
