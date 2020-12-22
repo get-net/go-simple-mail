@@ -586,10 +586,10 @@ func (email *Email) attach(f string, inline bool, name ...string) error {
 	}
 
 	// get the file mime type
-	//mimeType := mime.TypeByExtension(filepath.Ext(f))
-	//if mimeType == "" {
-	mimeType := "application/octet-stream"
-	//}
+	mimeType := mime.TypeByExtension(filepath.Ext(f))
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
 
 	// get the filename
 	_, filename := filepath.Split(f)
