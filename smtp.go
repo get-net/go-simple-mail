@@ -283,6 +283,25 @@ func (c *smtpClient) data() (io.WriteCloser, error) {
 	return &dataCloser{c, c.text.DotWriter()}, nil
 }
 
+// bdat issues a BDAT command with chunk size write data to the server
+// and returns a write that can be used to write the mail headers and body.
+// The caller should send bdat with size 0 this close send message before
+// calling any more methods in c. A call to Bdat must be preceded by one
+// or more call to Rcpt.
+func (c *smtpClient) bdat(size int, last bool) (io.Writer, error) {
+	var err error
+	if last {
+		_, _, err = c.cmd(250, "BDAT %d LAST", size)
+	} else {
+		_, err = fmt.Fprintf(c.text.W, "BDAT %d\r\n", size)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	return c.text.W, nil
+}
+
 // extension reports whether an extension is support by the server.
 // The extension name is case-insensitive. If the extension is supported,
 // extension also returns a string that contains any parameters the

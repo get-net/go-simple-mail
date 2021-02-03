@@ -6,7 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"mime"
 	"net"
 	"net/mail"
@@ -586,12 +586,6 @@ func (email *Email) AddInlineData(data []byte, filename, mimeType string) *Email
 
 // attach does the low level attaching of the files
 func (email *Email) attach(f string, inline bool, name ...string) error {
-	// Get the file data
-	data, err := ioutil.ReadFile(f)
-	if err != nil {
-		return errors.New("Mail Error: Failed to add file with following error: " + err.Error())
-	}
-
 	// get the file mime type
 	mimeType := mime.TypeByExtension(filepath.Ext(f))
 	if mimeType == "" {
@@ -610,13 +604,11 @@ func (email *Email) attach(f string, inline bool, name ...string) error {
 		email.inlines = append(email.inlines, &file{
 			filename: filename,
 			mimeType: mimeType,
-			data:     data,
 		})
 	} else {
 		email.attachments = append(email.attachments, &file{
 			filename: filename,
 			mimeType: mimeType,
-			data:     data,
 		})
 	}
 
@@ -706,7 +698,9 @@ func (email *Email) hasAlternativePart() bool {
 
 // GetMessage builds and returns the email message (RFC822 formatted message)
 func (email *Email) GetMessage() string {
-	msg := newMessage(email)
+	buf := new(bytes.Buffer)
+
+	msg := newMessage(email, buf)
 
 	if email.hasMixedPart() {
 		msg.openMultipart("mixed")
@@ -738,7 +732,11 @@ func (email *Email) GetMessage() string {
 		msg.closeMultipart()
 	}
 
-	return msg.getHeaders() + msg.body.String()
+	return buf.String()
+}
+
+func (email *Email) GetSize() int {
+	return 0
 }
 
 // Send sends the composed email
@@ -761,9 +759,7 @@ func (email *Email) SendEnvelopeFrom(from string, client *SMTPClient) error {
 		return errors.New("Mail Error: No recipient specified")
 	}
 
-	msg := email.GetMessage()
-
-	return send(from, email.recipients, msg, client)
+	return send(from, email.recipients, "", email, client)
 }
 
 // dial connects to the smtp server with the request encryption type
@@ -928,11 +924,12 @@ func SendMessage(from string, recipients []string, msg string, client *SMTPClien
 		return errors.New("Mail Error: No recipient specified")
 	}
 
-	return send(from, recipients, msg, client)
+	msgReader := bytes.NewBufferString(msg)
+	return send(from, recipients, msgReader, client)
 }
 
 // send does the low level sending of the email
-func send(from string, to []string, msg string, client *SMTPClient) error {
+func send(from string, to []string, msg io.Reader, client *SMTPClient) error {
 	//Check if client struct is not nil
 	if client != nil {
 
@@ -944,7 +941,7 @@ func send(from string, to []string, msg string, client *SMTPClient) error {
 			if client.SendTimeout != 0 {
 				smtpSendChannel = make(chan error, 1)
 
-				go func(from string, to []string, msg string, c *smtpClient) {
+				go func(from string, to []string, msg io.Reader, c *smtpClient) {
 					smtpSendChannel <- sendMailProcess(from, to, msg, c)
 				}(from, to, msg, client.Client)
 			}
@@ -970,13 +967,20 @@ func send(from string, to []string, msg string, client *SMTPClient) error {
 	return errors.New("Mail Error: No SMTP Client Provided")
 }
 
-func sendMailProcess(from string, to []string, msg string, c *smtpClient) error {
+func sendMailProcess(from string, to []string, reader io.Reader, c *smtpClient) error {
 
 	cmdArgs := make(map[string]string)
 
-	if _, ok := c.ext["SIZE"]; ok {
-		cmdArgs["SIZE"] = strconv.Itoa(len(msg))
-	}
+	//var size int
+	//if email == nil {
+	//	size = len(msg)
+	//} else {
+	//	size = email.GetSize()
+	//}
+
+	//if _, ok := c.ext["SIZE"]; ok {
+	//	cmdArgs["SIZE"] = strconv.Itoa(size)
+	//}
 
 	// Set the sender
 	if err := c.mail(from, cmdArgs); err != nil {
@@ -996,10 +1000,20 @@ func sendMailProcess(from string, to []string, msg string, c *smtpClient) error 
 		return err
 	}
 
-	// write the message
-	_, err = fmt.Fprint(w, msg)
-	if err != nil {
-		return err
+	buff := make([]byte, 1024*1024)
+	for {
+		n, err := reader.Read(buff)
+		if err != nil && err != io.EOF {
+			return err
+		}
+		buff = buff[:n]
+		_, wrErr := w.Write(buff)
+		if wrErr != nil {
+			return wrErr
+		}
+		if err == io.EOF {
+			break
+		}
 	}
 
 	err = w.Close()

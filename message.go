@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"mime/quotedprintable"
 	"net/textproto"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -14,8 +15,7 @@ import (
 )
 
 type message struct {
-	headers  textproto.MIMEHeader
-	body     *bytes.Buffer
+	body     io.Writer
 	writers  []*multipart.Writer
 	parts    uint8
 	cids     map[string]string
@@ -23,13 +23,26 @@ type message struct {
 	encoding encoding
 }
 
-func newMessage(email *Email) *message {
-	return &message{
-		headers:  email.headers,
-		body:     new(bytes.Buffer),
+func newMessage(email *Email, writer io.Writer) *message {
+	message := message{
 		cids:     make(map[string]string),
 		charset:  email.Charset,
 		encoding: email.Encoding}
+
+	if writer != nil {
+		message.body = writer
+	} else {
+		message.body = new(bytes.Buffer)
+	}
+
+	// add date if not exist
+	if date := email.headers.Get("Date"); date == "" {
+		email.headers.Set("Date", time.Now().Format(time.RFC1123Z))
+	}
+
+	message.write(email.headers, nil, message.encoding)
+
+	return &message
 }
 
 func encodeHeader(text string, charset string, usedChars int) string {
@@ -41,32 +54,14 @@ func encodeHeader(text string, charset string, usedChars int) string {
 	encoder.encode([]byte(text))
 
 	return buf.String()
-
-	/*
-			switch encoding {
-			case EncodingBase64:
-				return mime.BEncoding.Encode(charset, text)
-			default:
-				return mime.QEncoding.Encode(charset, text)
-		}
-	*/
 }
 
-// getHeaders returns the message headers
-func (msg *message) getHeaders() (headers string) {
-	// if the date header isn't set, set it
-	if date := msg.headers.Get("Date"); date == "" {
-		msg.headers.Set("Date", time.Now().Format(time.RFC1123Z))
+func getHeaders(header textproto.MIMEHeader, charset string) string {
+	var headers string
+	for header, values := range header {
+		headers += header + ": " + encodeHeader(strings.Join(values, ", "), charset, len(header)+2) + "\r\n"
 	}
-
-	// encode and combine the headers
-	for header, values := range msg.headers {
-		headers += header + ": " + encodeHeader(strings.Join(values, ", "), msg.charset, len(header)+2) + "\r\n"
-	}
-
-	headers = headers + "\r\n"
-
-	return
+	return headers
 }
 
 // getCID gets the generated CID for the provided text
@@ -105,17 +100,17 @@ func (msg *message) openMultipart(multipartType string) {
 	// create a new multipart writer
 	msg.writers = append(msg.writers, multipart.NewWriter(msg.body))
 	// create the boundary
-	contentType := "multipart/" + multipartType + ";\n \tboundary=" + msg.writers[msg.parts].Boundary()
+	contentType := "multipart/" + multipartType + "; boundary=" + msg.writers[msg.parts].Boundary()
+
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Type", contentType)
 
 	// if no existing parts, add header to main header group
-	if msg.parts == 0 {
-		msg.headers.Set("Content-Type", contentType)
-	} else { // add header to multipart section
-		header := make(textproto.MIMEHeader)
-		header.Set("Content-Type", contentType)
+	if msg.parts != 0 {
 		msg.writers[msg.parts-1].CreatePart(header)
 	}
 
+	msg.write(header, nil, EncodingNone)
 	msg.parts++
 }
 
@@ -155,7 +150,7 @@ func qpEncode(text []byte) []byte {
 	return buf.Bytes()
 }
 
-const maxLineChars = 76
+const maxLineChars = 400
 
 type base64LineWrap struct {
 	writer       io.Writer
@@ -188,18 +183,14 @@ func (e *base64LineWrap) Write(p []byte) (n int, err error) {
 }
 
 func (msg *message) write(header textproto.MIMEHeader, body []byte, encoding encoding) {
-	msg.writeHeader(header)
-	msg.writeBody(body, encoding)
-}
-
-func (msg *message) writeHeader(headers textproto.MIMEHeader) {
-	// if there are no parts add header to main headers
 	if msg.parts == 0 {
-		for header, value := range headers {
-			msg.headers[header] = value
-		}
-	} else { // add header to multipart section
-		msg.writers[msg.parts-1].CreatePart(headers)
+		headers := getHeaders(header, msg.charset)
+		msg.writeBody([]byte(headers), EncodingQuotedPrintable)
+	} else {
+		msg.writers[msg.parts-1].CreatePart(header)
+	}
+	if len(body) != 0 {
+		msg.writeBody(body, encoding)
 	}
 }
 
@@ -232,17 +223,35 @@ func escapeQuotes(s string) string {
 
 func (msg *message) addFiles(files []*file, inline bool) {
 	encoding := EncodingBase64
+	if msg.encoding == EncodingNone {
+		encoding = EncodingNone
+	}
+
 	for _, file := range files {
 		header := make(textproto.MIMEHeader)
-		header.Set("Content-Type", file.mimeType+";\n \tname=\""+encodeHeader(escapeQuotes(file.filename), msg.charset, 6)+`"`)
+		header.Set("Content-Type", file.mimeType+"; name=\""+encodeHeader(escapeQuotes(file.filename), msg.charset, 6)+`"`)
 		header.Set("Content-Transfer-Encoding", encoding.string())
+
 		if inline {
-			header.Set("Content-Disposition", "inline;\n \tfilename=\""+encodeHeader(escapeQuotes(file.filename), msg.charset, 10)+`"`)
+			header.Set("Content-Disposition", "inline; filename=\""+encodeHeader(escapeQuotes(file.filename), msg.charset, 10)+`"`)
 			header.Set("Content-ID", "<"+msg.getCID(file.filename)+">")
 		} else {
-			header.Set("Content-Disposition", "attachment;\n \tfilename=\""+encodeHeader(escapeQuotes(file.filename), msg.charset, 10)+`"`)
+			header.Set("Content-Disposition", "attachment; filename=\""+encodeHeader(escapeQuotes(file.filename), msg.charset, 10)+`"`)
 		}
-
-		msg.write(header, file.data, encoding)
+		msg.write(header, nil, EncodingQuotedPrintable)
+		if len(file.data) > 0 {
+			msg.body.Write(file.data)
+		} else {
+			reader, err := os.Open(file.filename)
+			if err == nil {
+				if encoding == EncodingBase64 {
+					encoder := base64.NewEncoder(base64.StdEncoding, msg.body)
+					io.Copy(encoder, reader)
+				} else {
+					io.Copy(msg.body, reader)
+				}
+				reader.Close()
+			}
+		}
 	}
 }
