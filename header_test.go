@@ -105,7 +105,7 @@ func testWriter(t *testing.T, binary bool) {
 	for _, test := range tests {
 		//fmt.Println("Here! <---------------------------------------------------------------")
 		buf := new(bytes.Buffer)
-		w := newEncoder(buf, test.charset, test.usedChars)
+		w := newEncoder(buf, test.charset, test.usedChars, true)
 
 		if _, err := w.encode([]byte(test.in)); err != nil {
 			t.Errorf("Write(%q): %v", test.in, err)

@@ -3,11 +3,11 @@ package mail
 import (
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"io"
 	"mime/multipart"
 	"mime/quotedprintable"
 	"net/textproto"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -15,24 +15,34 @@ import (
 )
 
 type message struct {
-	body     io.Writer
-	writers  []*multipart.Writer
-	parts    uint8
-	cids     map[string]string
-	charset  string
-	encoding encoding
+	bodySend        bool
+	fileHeaderSend  bool
+	body            *bytes.Buffer
+	writers         []*multipart.Writer
+	encoderBuff     bytes.Buffer
+	encoder         io.WriteCloser
+	attachmentIndex int
+	inlineIndex     int
+	attachments     []*file
+	inlines         []*file
+	parts           uint8
+	cids            map[string]string
+	charset         string
+	encoding        encoding
 }
 
-func newMessage(email *Email, writer io.Writer) *message {
+func newMessage(email *Email) *message {
 	message := message{
-		cids:     make(map[string]string),
-		charset:  email.Charset,
-		encoding: email.Encoding}
-
-	if writer != nil {
-		message.body = writer
-	} else {
-		message.body = new(bytes.Buffer)
+		cids:            make(map[string]string),
+		charset:         email.Charset,
+		encoding:        email.Encoding,
+		attachmentIndex: 0,
+		attachments:     email.attachments,
+		inlineIndex:     0,
+		inlines:         email.inlines,
+		bodySend:        false,
+		fileHeaderSend:  false,
+		body:            new(bytes.Buffer),
 	}
 
 	// add date if not exist
@@ -42,24 +52,46 @@ func newMessage(email *Email, writer io.Writer) *message {
 
 	message.write(email.headers, nil, message.encoding)
 
+	message.encoder = base64.NewEncoder(base64.StdEncoding, &base64LineWrap{writer: &message.encoderBuff})
+
+	if email.hasMixedPart() {
+		message.openMultipart("mixed")
+	}
+
+	if email.hasRelatedPart() {
+		message.openMultipart("related")
+	}
+
+	if email.hasAlternativePart() {
+		message.openMultipart("alternative")
+	}
+
+	for _, part := range email.parts {
+		message.addBody(part.contentType, part.body.Bytes())
+	}
+
+	if email.hasAlternativePart() {
+		message.closeMultipart()
+	}
+
 	return &message
 }
 
-func encodeHeader(text string, charset string, usedChars int) string {
+func encodeHeader(text string, charset string, usedChars int, limit bool) string {
 	// create buffer
 	buf := new(bytes.Buffer)
 
 	// encode
-	encoder := newEncoder(buf, charset, usedChars)
+	encoder := newEncoder(buf, charset, usedChars, limit)
 	encoder.encode([]byte(text))
 
 	return buf.String()
 }
 
-func getHeaders(header textproto.MIMEHeader, charset string) string {
+func getHeaders(header textproto.MIMEHeader, charset string, limit bool) string {
 	var headers string
 	for header, values := range header {
-		headers += header + ": " + encodeHeader(strings.Join(values, ", "), charset, len(header)+2) + "\r\n"
+		headers += header + ": " + encodeHeader(strings.Join(values, ", "), charset, len(header)+2, limit) + "\r\n"
 	}
 	return headers
 }
@@ -110,7 +142,7 @@ func (msg *message) openMultipart(multipartType string) {
 		msg.writers[msg.parts-1].CreatePart(header)
 	}
 
-	msg.write(header, nil, EncodingNone)
+	msg.write(header, nil, EncodingQuotedPrintable)
 	msg.parts++
 }
 
@@ -183,9 +215,14 @@ func (e *base64LineWrap) Write(p []byte) (n int, err error) {
 }
 
 func (msg *message) write(header textproto.MIMEHeader, body []byte, encoding encoding) {
+	limit := true
+	if encoding == EncodingNone {
+		limit = false
+	}
+
 	if msg.parts == 0 {
-		headers := getHeaders(header, msg.charset)
-		msg.writeBody([]byte(headers), EncodingQuotedPrintable)
+		headers := getHeaders(header, msg.charset, limit)
+		msg.writeBody([]byte(headers), EncodingNone)
 	} else {
 		msg.writers[msg.parts-1].CreatePart(header)
 	}
@@ -223,35 +260,185 @@ func escapeQuotes(s string) string {
 
 func (msg *message) addFiles(files []*file, inline bool) {
 	encoding := EncodingBase64
+	limit := true
 	if msg.encoding == EncodingNone {
 		encoding = EncodingNone
+		limit = false
 	}
 
 	for _, file := range files {
 		header := make(textproto.MIMEHeader)
-		header.Set("Content-Type", file.mimeType+"; name=\""+encodeHeader(escapeQuotes(file.filename), msg.charset, 6)+`"`)
+		header.Set("Content-Type", file.mimeType+"; name=\""+encodeHeader(escapeQuotes(file.filename),
+			msg.charset, 6, limit)+`"`)
 		header.Set("Content-Transfer-Encoding", encoding.string())
 
 		if inline {
-			header.Set("Content-Disposition", "inline; filename=\""+encodeHeader(escapeQuotes(file.filename), msg.charset, 10)+`"`)
+			header.Set("Content-Disposition", "inline; filename=\""+encodeHeader(escapeQuotes(file.filename),
+				msg.charset, 10, limit)+`"`)
 			header.Set("Content-ID", "<"+msg.getCID(file.filename)+">")
 		} else {
-			header.Set("Content-Disposition", "attachment; filename=\""+encodeHeader(escapeQuotes(file.filename), msg.charset, 10)+`"`)
+			header.Set("Content-Disposition", "attachment; filename=\""+
+				encodeHeader(escapeQuotes(file.filename), msg.charset, 10, limit)+`"`)
 		}
 		msg.write(header, nil, EncodingQuotedPrintable)
-		if len(file.data) > 0 {
-			msg.body.Write(file.data)
+		if encoding == EncodingBase64 {
+			encoder := base64.NewEncoder(base64.StdEncoding, msg.body)
+			io.Copy(encoder, file.reader)
 		} else {
-			reader, err := os.Open(file.filename)
-			if err == nil {
-				if encoding == EncodingBase64 {
-					encoder := base64.NewEncoder(base64.StdEncoding, msg.body)
-					io.Copy(encoder, reader)
-				} else {
-					io.Copy(msg.body, reader)
-				}
-				reader.Close()
-			}
+			io.Copy(msg.body, file.reader)
 		}
 	}
+}
+
+func (msg *message) AddFileHeaders(index int, inline bool) error {
+	var files []*file
+
+	encoding := EncodingBase64
+	limit := true
+	if msg.encoding == EncodingNone {
+		encoding = EncodingNone
+		limit = false
+	}
+
+	if inline {
+		files = msg.inlines
+	} else {
+		files = msg.attachments
+	}
+	if !inline && index >= len(files) {
+		return errors.New("index out of range")
+	}
+
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Type", files[index].mimeType+"; name=\""+
+		encodeHeader(escapeQuotes(files[index].filename), msg.charset, 6, limit)+`"`)
+	header.Set("Content-Transfer-Encoding", encoding.string())
+
+	if inline {
+		header.Set("Content-Disposition", "inline; filename=\""+
+			encodeHeader(escapeQuotes(files[index].filename), msg.charset, 10, limit)+`"`)
+		header.Set("Content-ID", "<"+msg.getCID(files[index].filename)+">")
+	} else {
+		header.Set("Content-Disposition", "attachment; filename=\""+
+			encodeHeader(escapeQuotes(files[index].filename), msg.charset, 10, limit)+`"`)
+	}
+	msg.write(header, nil, EncodingQuotedPrintable)
+	return nil
+}
+
+func (msg *message) ReadFile(p []byte, index int, inline bool) (n int, err error) {
+	var files []*file
+	pLen := len(p)
+	binaryLen := (pLen / 100) * 70
+	binBuff := make([]byte, binaryLen)
+
+	if inline {
+		files = msg.inlines
+	} else {
+		files = msg.attachments
+	}
+	if !inline && index >= len(files) {
+		return 0, errors.New("index out of range")
+	}
+
+	if msg.encoding == EncodingNone {
+		return files[index].reader.Read(p)
+	} else {
+		nBin, nErr := files[index].reader.Read(binBuff)
+		if nErr != nil && nErr != io.EOF {
+			return 0, nErr
+		}
+		binBuff = binBuff[:nBin]
+
+		n, err = msg.encoder.Write(binBuff)
+		if nErr == io.EOF {
+			msg.encoder.Close()
+		}
+		if err != nil {
+			return
+		}
+		n, err = msg.encoderBuff.Read(p)
+		if err != nil {
+			return
+		}
+		return
+	}
+}
+
+func (msg *message) Read(p []byte) (n int, err error) {
+	var nBody int
+
+	if !msg.bodySend {
+		nBody, err = msg.body.Read(p)
+		if err != nil && err != io.EOF {
+			return nBody, err
+		}
+	}
+	if err == io.EOF {
+		if len(msg.attachments) == msg.attachmentIndex && len(msg.inlines) == msg.inlineIndex {
+			msg.bodySend = false
+		} else {
+			msg.bodySend = true
+			return nBody, nil
+		}
+	}
+
+	if msg.bodySend {
+		if len(msg.attachments) > 0 && len(msg.attachments) > msg.attachmentIndex {
+			if !msg.fileHeaderSend {
+				msg.AddFileHeaders(msg.attachmentIndex, false)
+				nBody, err = msg.body.Read(p)
+				msg.fileHeaderSend = true
+				if err != io.EOF {
+					msg.bodySend = false
+				}
+				if err != nil && err != io.EOF {
+					return nBody, err
+				}
+				return nBody, nil
+			}
+			n, err = msg.ReadFile(p, msg.attachmentIndex, false)
+			if err == io.EOF {
+				msg.attachmentIndex++
+				if len(msg.attachments) > msg.attachmentIndex {
+					msg.fileHeaderSend = false
+				} else {
+					msg.closeMultipart()
+					msg.bodySend = false
+					return n, nil
+				}
+
+			}
+			return n, nil
+		}
+		if len(msg.inlines) > 0 && len(msg.inlines) > msg.inlineIndex {
+			if !msg.fileHeaderSend {
+				msg.AddFileHeaders(msg.inlineIndex, true)
+				nBody, err = msg.body.Read(p)
+				msg.fileHeaderSend = true
+				if err != io.EOF {
+					msg.bodySend = false
+				}
+				if err != nil && err != io.EOF {
+					return nBody, err
+				}
+				return nBody, nil
+			}
+			n, err = msg.ReadFile(p, msg.inlineIndex, true)
+			if err == io.EOF {
+				msg.inlineIndex++
+				if len(msg.inlines) > msg.inlineIndex {
+					msg.fileHeaderSend = false
+				} else {
+					msg.closeMultipart()
+					msg.bodySend = false
+					return n, nil
+				}
+
+			}
+			return n, nil
+		}
+	}
+
+	return nBody, err
 }

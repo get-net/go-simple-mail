@@ -1,7 +1,6 @@
 package mail
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -41,51 +40,37 @@ func TestMessageWriter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	bdatW := &BdatWriter{dst: buf}
-	var wr = bufio.NewWriterSize(bdatW, 200)
-	defer wr.Flush()
+	//
+	//bdatW := &BdatWriter{dst: buf}
+	//var wr = bufio.NewWriterSize(bdatW, 200)
+	//defer wr.Flush()
 
 	email := NewMSG()
 	email.SetFrom("test@gmail.com")
 	email.SetSubject("test")
 	email.AddTo("test@gmail.com")
-	email.AddAttachment("message_test.go")
+	email.AddAttachment("10.enc.mp3")
+	//email.AddAttachment("email_test.go")
 	email.SetBody(TextPlain, "just test\r\n")
 	email.Encoding = EncodingNone
 
 	email.AddAttachmentBase64("dGVzdCBiYXJvdHJhdW1hCg==", "NO_NDFL6_5902_5902_5902174276590201001_20200506_29d5b070-828f-4f7e-afe3-3bf8dd75034d.xml")
 
-	msg := newMessage(email, wr)
+	msg := newMessage(email)
 
-	if email.hasMixedPart() {
-		msg.openMultipart("mixed")
-	}
+	//	msg.addFiles(email.inlines, true)
+	//	if email.hasRelatedPart() {
+	//		msg.closeMultipart()
+	//	}
 
-	if email.hasRelatedPart() {
-		msg.openMultipart("related")
+	//	msg.addFiles(email.attachments, false)
+	//	if email.hasMixedPart() {
+	//		msg.closeMultipart()
+	//	}
+	//io.CopyBuffer(buf,msg,make([]byte,100))
+	n, err := io.Copy(buf, msg)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	if email.hasAlternativePart() {
-		msg.openMultipart("alternative")
-	}
-
-	for _, part := range email.parts {
-		msg.addBody(part.contentType, part.body.Bytes())
-	}
-
-	if email.hasAlternativePart() {
-		msg.closeMultipart()
-	}
-
-	msg.addFiles(email.inlines, true)
-	if email.hasRelatedPart() {
-		msg.closeMultipart()
-	}
-
-	msg.addFiles(email.attachments, false)
-	if email.hasMixedPart() {
-		msg.closeMultipart()
-	}
-	//	println(buf.String())
+	println("Writes: ", n)
 }

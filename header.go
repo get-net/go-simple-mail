@@ -16,14 +16,15 @@ type encoder struct {
 	w         *bufio.Writer
 	charset   string
 	usedChars int
+	limit     bool
 }
 
 // newEncoder returns a new mime header encoder that writes to w. The c
 // parameter specifies the name of the character set of the text that will be
 // encoded. The u parameter indicates how many characters have been used
 // already.
-func newEncoder(w io.Writer, c string, u int) *encoder {
-	return &encoder{bufio.NewWriter(w), strings.ToUpper(c), u}
+func newEncoder(w io.Writer, c string, u int, limit bool) *encoder {
+	return &encoder{bufio.NewWriter(w), strings.ToUpper(c), u, limit}
 }
 
 // encode encodes p using the "Q" encoding and writes it to the underlying
@@ -68,7 +69,7 @@ func (e *encoder) encode(p []byte) (n int, err error) {
 			newWord += word
 
 			// check line length
-			if (e.usedChars+len(lineBuffer)+len(newWord) /*+len(" ")+len(word)*/) > maxLineLength && (lineBuffer != "" || e.usedChars != 0) {
+			if (e.usedChars+len(lineBuffer)+len(newWord) /*+len(" ")+len(word)*/) > maxLineLength && (lineBuffer != "" || e.usedChars != 0) && e.limit {
 				output.WriteString(lineBuffer + "\r\n")
 
 				// first word on newline needs a space in front

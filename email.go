@@ -11,8 +11,8 @@ import (
 	"net"
 	"net/mail"
 	"net/textproto"
+	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 )
 
@@ -68,7 +68,37 @@ type part struct {
 type file struct {
 	filename string
 	mimeType string
-	data     []byte
+	//	data     []byte
+	reader  io.Reader
+	encBuff bytes.Buffer
+	encoder io.WriteCloser
+}
+
+func (f *file) Read(p []byte) (n int, err error) {
+	if f.encoder == nil {
+		f.encoder = base64.NewEncoder(base64.StdEncoding, &f.encBuff)
+	}
+	pLen := len(p)
+	binaryLen := (pLen / 100) * 70
+	binBuff := make([]byte, binaryLen)
+	nBin, nErr := f.reader.Read(binBuff)
+	if nErr != nil && nErr != io.EOF {
+		return 0, nErr
+	}
+	binBuff = binBuff[:nBin]
+
+	n, err = f.encoder.Write(binBuff)
+	if nErr == io.EOF {
+		f.encoder.Close()
+	}
+	if err != nil {
+		return
+	}
+	n, err = f.encBuff.Read(p)
+	if err != nil {
+		return
+	}
+	return
 }
 
 // Encryption type to enum encryption types (None, SSL/TLS, STARTTLS)
@@ -586,6 +616,13 @@ func (email *Email) AddInlineData(data []byte, filename, mimeType string) *Email
 
 // attach does the low level attaching of the files
 func (email *Email) attach(f string, inline bool, name ...string) error {
+
+	// Get the file data
+	reader, err := os.Open(f)
+	if err != nil {
+		return errors.New("Mail Error: Failed to add file with following error: " + err.Error())
+	}
+	//	defer reader.Close()
 	// get the file mime type
 	mimeType := mime.TypeByExtension(filepath.Ext(f))
 	if mimeType == "" {
@@ -604,11 +641,13 @@ func (email *Email) attach(f string, inline bool, name ...string) error {
 		email.inlines = append(email.inlines, &file{
 			filename: filename,
 			mimeType: mimeType,
+			reader:   reader,
 		})
 	} else {
 		email.attachments = append(email.attachments, &file{
 			filename: filename,
 			mimeType: mimeType,
+			reader:   reader,
 		})
 	}
 
@@ -628,13 +667,13 @@ func (email *Email) attachData(data []byte, inline bool, filename, mimeType stri
 		email.inlines = append(email.inlines, &file{
 			filename: filename,
 			mimeType: mimeType,
-			data:     data,
+			reader:   bytes.NewReader(data),
 		})
 	} else {
 		email.attachments = append(email.attachments, &file{
 			filename: filename,
 			mimeType: mimeType,
-			data:     data,
+			reader:   bytes.NewReader(data),
 		})
 	}
 }
@@ -657,7 +696,7 @@ func (email *Email) attachB64(b64File string, name string) error {
 	email.attachments = append(email.attachments, &file{
 		filename: name,
 		mimeType: mimeType,
-		data:     dec,
+		reader:   bytes.NewReader(dec),
 	})
 
 	return nil
@@ -700,7 +739,7 @@ func (email *Email) hasAlternativePart() bool {
 func (email *Email) GetMessage() string {
 	buf := new(bytes.Buffer)
 
-	msg := newMessage(email, buf)
+	msg := newMessage(email)
 
 	if email.hasMixedPart() {
 		msg.openMultipart("mixed")
@@ -744,6 +783,11 @@ func (email *Email) Send(client *SMTPClient) error {
 	return email.SendEnvelopeFrom(email.from, client)
 }
 
+func (email *Email) Read(p []byte) (n int, err error) {
+	msg := newMessage(email)
+	return msg.Read(p)
+}
+
 // SendEnvelopeFrom sends the composed email with envelope
 // sender. 'from' must be an email address.
 func (email *Email) SendEnvelopeFrom(from string, client *SMTPClient) error {
@@ -759,7 +803,7 @@ func (email *Email) SendEnvelopeFrom(from string, client *SMTPClient) error {
 		return errors.New("Mail Error: No recipient specified")
 	}
 
-	return send(from, email.recipients, "", email, client)
+	return send(from, email.recipients, email, client)
 }
 
 // dial connects to the smtp server with the request encryption type
