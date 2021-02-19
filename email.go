@@ -6,13 +6,16 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/get-net/textproto"
 	"io"
+	"io/ioutil"
 	"mime"
 	"net"
 	"net/mail"
-	"net/textproto"
+	tx "net/textproto"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
@@ -23,7 +26,7 @@ type Email struct {
 	replyTo     string
 	returnPath  string
 	recipients  []string
-	headers     textproto.MIMEHeader
+	headers     tx.MIMEHeader
 	parts       []part
 	attachments []*file
 	inlines     []*file
@@ -31,6 +34,21 @@ type Email struct {
 	Encoding    encoding
 	Error       error
 	SMTPServer  *smtpClient
+}
+
+type BodyType string
+
+const (
+	Body7Bit       BodyType = "7BIT"
+	Body8BitMIME   BodyType = "8BITMIME"
+	BodyBinaryMIME BodyType = "BINARYMIME"
+)
+
+type Options struct {
+	Body    BodyType
+	Size    int64
+	TransID string
+	XtaxFTC string
 }
 
 /*
@@ -68,37 +86,10 @@ type part struct {
 type file struct {
 	filename string
 	mimeType string
-	//	data     []byte
-	reader  io.Reader
-	encBuff bytes.Buffer
-	encoder io.WriteCloser
-}
-
-func (f *file) Read(p []byte) (n int, err error) {
-	if f.encoder == nil {
-		f.encoder = base64.NewEncoder(base64.StdEncoding, &f.encBuff)
-	}
-	pLen := len(p)
-	binaryLen := (pLen / 100) * 70
-	binBuff := make([]byte, binaryLen)
-	nBin, nErr := f.reader.Read(binBuff)
-	if nErr != nil && nErr != io.EOF {
-		return 0, nErr
-	}
-	binBuff = binBuff[:nBin]
-
-	n, err = f.encoder.Write(binBuff)
-	if nErr == io.EOF {
-		f.encoder.Close()
-	}
-	if err != nil {
-		return
-	}
-	n, err = f.encBuff.Read(p)
-	if err != nil {
-		return
-	}
-	return
+	size     int64
+	reader   io.ReadCloser
+	encBuff  bytes.Buffer
+	encoder  io.WriteCloser
 }
 
 // Encryption type to enum encryption types (None, SSL/TLS, STARTTLS)
@@ -165,7 +156,7 @@ const (
 // NewMSG creates a new email. It uses UTF-8 by default. All charsets: http://webcheatsheet.com/HTML/character_sets_list.php
 func NewMSG() *Email {
 	email := &Email{
-		headers:  make(textproto.MIMEHeader),
+		headers:  make(tx.MIMEHeader),
 		Charset:  "UTF-8",
 		Encoding: EncodingQuotedPrintable,
 	}
@@ -622,7 +613,12 @@ func (email *Email) attach(f string, inline bool, name ...string) error {
 	if err != nil {
 		return errors.New("Mail Error: Failed to add file with following error: " + err.Error())
 	}
-	//	defer reader.Close()
+
+	stat, err := reader.Stat()
+	if err != nil {
+		return err
+	}
+
 	// get the file mime type
 	mimeType := mime.TypeByExtension(filepath.Ext(f))
 	if mimeType == "" {
@@ -640,12 +636,14 @@ func (email *Email) attach(f string, inline bool, name ...string) error {
 	if inline {
 		email.inlines = append(email.inlines, &file{
 			filename: filename,
+			size:     stat.Size(),
 			mimeType: mimeType,
 			reader:   reader,
 		})
 	} else {
 		email.attachments = append(email.attachments, &file{
 			filename: filename,
+			size:     stat.Size(),
 			mimeType: mimeType,
 			reader:   reader,
 		})
@@ -667,13 +665,15 @@ func (email *Email) attachData(data []byte, inline bool, filename, mimeType stri
 		email.inlines = append(email.inlines, &file{
 			filename: filename,
 			mimeType: mimeType,
-			reader:   bytes.NewReader(data),
+			size:     int64(len(data)),
+			reader:   ioutil.NopCloser(bytes.NewReader(data)),
 		})
 	} else {
 		email.attachments = append(email.attachments, &file{
 			filename: filename,
 			mimeType: mimeType,
-			reader:   bytes.NewReader(data),
+			size:     int64(len(data)),
+			reader:   ioutil.NopCloser(bytes.NewReader(data)),
 		})
 	}
 }
@@ -696,7 +696,8 @@ func (email *Email) attachB64(b64File string, name string) error {
 	email.attachments = append(email.attachments, &file{
 		filename: name,
 		mimeType: mimeType,
-		reader:   bytes.NewReader(dec),
+		size:     int64(len(dec)),
+		reader:   ioutil.NopCloser(bytes.NewReader(dec)),
 	})
 
 	return nil
@@ -741,56 +742,22 @@ func (email *Email) GetMessage() string {
 
 	msg := newMessage(email)
 
-	if email.hasMixedPart() {
-		msg.openMultipart("mixed")
-	}
-
-	if email.hasRelatedPart() {
-		msg.openMultipart("related")
-	}
-
-	if email.hasAlternativePart() {
-		msg.openMultipart("alternative")
-	}
-
-	for _, part := range email.parts {
-		msg.addBody(part.contentType, part.body.Bytes())
-	}
-
-	if email.hasAlternativePart() {
-		msg.closeMultipart()
-	}
-
-	msg.addFiles(email.inlines, true)
-	if email.hasRelatedPart() {
-		msg.closeMultipart()
-	}
-
-	msg.addFiles(email.attachments, false)
-	if email.hasMixedPart() {
-		msg.closeMultipart()
+	_, err := io.Copy(buf, msg)
+	if err != nil {
+		return ""
 	}
 
 	return buf.String()
 }
 
-func (email *Email) GetSize() int {
-	return 0
-}
-
 // Send sends the composed email
-func (email *Email) Send(client *SMTPClient) error {
-	return email.SendEnvelopeFrom(email.from, client)
-}
-
-func (email *Email) Read(p []byte) (n int, err error) {
-	msg := newMessage(email)
-	return msg.Read(p)
+func (email *Email) Send(client *SMTPClient, opts Options) error {
+	return email.SendEnvelopeFrom(email.from, client, opts)
 }
 
 // SendEnvelopeFrom sends the composed email with envelope
 // sender. 'from' must be an email address.
-func (email *Email) SendEnvelopeFrom(from string, client *SMTPClient) error {
+func (email *Email) SendEnvelopeFrom(from string, client *SMTPClient, opts Options) error {
 	if email.Error != nil {
 		return email.Error
 	}
@@ -803,7 +770,9 @@ func (email *Email) SendEnvelopeFrom(from string, client *SMTPClient) error {
 		return errors.New("Mail Error: No recipient specified")
 	}
 
-	return send(from, email.recipients, email, client)
+	msg := newMessage(email)
+	opts.Size = msg.GetSize()
+	return send(from, email.recipients, msg, client, opts)
 }
 
 // dial connects to the smtp server with the request encryption type
@@ -960,7 +929,7 @@ func (smtpClient *SMTPClient) Close() error {
 
 // SendMessage sends a message (a RFC822 formatted message)
 // 'from' must be an email address, recipients must be a slice of email address
-func SendMessage(from string, recipients []string, msg string, client *SMTPClient) error {
+func SendMessage(from string, recipients []string, msg string, client *SMTPClient, opts Options) error {
 	if from == "" {
 		return errors.New("Mail Error: No From email specifier")
 	}
@@ -969,11 +938,11 @@ func SendMessage(from string, recipients []string, msg string, client *SMTPClien
 	}
 
 	msgReader := bytes.NewBufferString(msg)
-	return send(from, recipients, msgReader, client)
+	return send(from, recipients, msgReader, client, opts)
 }
 
 // send does the low level sending of the email
-func send(from string, to []string, msg io.Reader, client *SMTPClient) error {
+func send(from string, to []string, msg io.Reader, client *SMTPClient, opts Options) error {
 	//Check if client struct is not nil
 	if client != nil {
 
@@ -985,14 +954,14 @@ func send(from string, to []string, msg io.Reader, client *SMTPClient) error {
 			if client.SendTimeout != 0 {
 				smtpSendChannel = make(chan error, 1)
 
-				go func(from string, to []string, msg io.Reader, c *smtpClient) {
-					smtpSendChannel <- sendMailProcess(from, to, msg, c)
-				}(from, to, msg, client.Client)
+				go func(from string, to []string, msg io.Reader, c *smtpClient, opts Options) {
+					smtpSendChannel <- sendMailProcess(from, to, msg, c, opts)
+				}(from, to, msg, client.Client, opts)
 			}
 
 			if client.SendTimeout == 0 {
 				// no SendTimeout, just fire the sendMailProcess
-				return sendMailProcess(from, to, msg, client.Client)
+				return sendMailProcess(from, to, msg, client.Client, opts)
 			}
 
 			// get the send result or timeout result, which ever happens first
@@ -1011,20 +980,26 @@ func send(from string, to []string, msg io.Reader, client *SMTPClient) error {
 	return errors.New("Mail Error: No SMTP Client Provided")
 }
 
-func sendMailProcess(from string, to []string, reader io.Reader, c *smtpClient) error {
+func sendMailProcess(from string, to []string, reader io.Reader, c *smtpClient, opts Options) error {
 
 	cmdArgs := make(map[string]string)
 
-	//var size int
-	//if email == nil {
-	//	size = len(msg)
-	//} else {
-	//	size = email.GetSize()
-	//}
+	bdatEnable := false
 
-	//if _, ok := c.ext["SIZE"]; ok {
-	//	cmdArgs["SIZE"] = strconv.Itoa(size)
-	//}
+	if _, ok := c.ext["SIZE"]; ok {
+		cmdArgs["SIZE"] = strconv.Itoa(int(opts.Size))
+	}
+	if _, ok := c.ext["BINARYMIME"]; ok && opts.Body == BodyBinaryMIME {
+		cmdArgs["BINARYMIME"] = string(BodyBinaryMIME)
+		bdatEnable = true
+	}
+	if _, ok := c.ext["CHECKPOINT"]; ok && opts.TransID != "" {
+		cmdArgs["TRANSID"] = opts.TransID
+	}
+
+	if _, ok := c.ext["XTAXFTC"]; ok && opts.XtaxFTC != "" {
+		cmdArgs["XTAXFTC"] = opts.XtaxFTC
+	}
 
 	// Set the sender
 	if err := c.mail(from, cmdArgs); err != nil {
@@ -1038,33 +1013,61 @@ func sendMailProcess(from string, to []string, reader io.Reader, c *smtpClient) 
 		}
 	}
 
-	// Send the data command
-	w, err := c.data()
-	if err != nil {
-		return err
-	}
-
-	buff := make([]byte, 1024*1024)
-	for {
-		n, err := reader.Read(buff)
-		if err != nil && err != io.EOF {
+	if bdatEnable {
+		w := c.bdat()
+		for {
+			buff := make([]byte, 1024*1024)
+			n, err := reader.Read(buff)
+			if err != nil && err != io.EOF {
+				return err
+			}
+			if n > 0 {
+				buff = buff[:n]
+				_, wrErr := w.Write(buff)
+				if wrErr != nil {
+					return wrErr
+				}
+				_, _, err := c.text.ReadResponse(250)
+				if err != nil {
+					return err
+				}
+			}
+			if err == io.EOF {
+				break
+			}
+		}
+		err := w.Close()
+		if err != nil {
 			return err
 		}
-		buff = buff[:n]
-		_, wrErr := w.Write(buff)
-		if wrErr != nil {
-			return wrErr
+	} else {
+		// Send the data command
+		w, err := c.data()
+		if err != nil {
+			return err
 		}
-		if err == io.EOF {
-			break
+
+		buff := make([]byte, 1024*1024)
+		for {
+			n, err := reader.Read(buff)
+			if err != nil && err != io.EOF {
+				return err
+			}
+			buff = buff[:n]
+			_, wrErr := w.Write(buff)
+			if wrErr != nil {
+				return wrErr
+			}
+			if err == io.EOF {
+				break
+			}
+		}
+
+		err = w.Close()
+		if err != nil {
+			return err
 		}
 	}
-
-	err = w.Close()
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 

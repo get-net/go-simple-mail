@@ -20,9 +20,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/get-net/textproto"
 	"io"
 	"net"
-	"net/textproto"
 	"strings"
 )
 
@@ -222,16 +222,19 @@ func (c *smtpClient) mail(from string, extArgs ...map[string]string) error {
 	}
 	cmdStr := "MAIL FROM:<%s>"
 	if c.ext != nil {
-		if _, ok := c.ext["8BITMIME"]; ok {
+		if _, ok := c.ext["BINARYMIME"]; ok && extMap["BINARYMIME"] != "" {
+			cmdStr += " BODY=BINARYMIME"
+		}
+		if _, ok := c.ext["8BITMIME"]; ok && extMap["8BITMIME"] != "" {
 			cmdStr += " BODY=8BITMIME"
 		}
 		if _, ok := c.ext["SMTPUTF8"]; ok {
 			cmdStr += " SMTPUTF8"
 		}
 		if _, ok := c.ext["CHECKPOINT"]; ok {
-			if extMap["CHECKPOINT"] != "" {
+			if extMap["TRANSID"] != "" {
 				cmdStr += " TRANSID=<%s>"
-				args = append(args, extMap["CHECKPOINT"])
+				args = append(args, extMap["TRANSID"])
 			}
 		}
 		if _, ok := c.ext["SIZE"]; ok {
@@ -239,6 +242,10 @@ func (c *smtpClient) mail(from string, extArgs ...map[string]string) error {
 				cmdStr += " SIZE=%s"
 				args = append(args, extMap["SIZE"])
 			}
+		}
+		if _, ok := c.ext["XTAXFTC"]; ok && extMap["XTAXFTC"] != "" {
+			cmdStr += " XTAXFTC=%s"
+			args = append(args, extMap["XTAXFTC"])
 		}
 	}
 	args = append([]interface{}{from}, args...)
@@ -271,6 +278,29 @@ func (d *dataCloser) Close() error {
 	return err
 }
 
+type bDatCloser struct {
+	c *smtpClient
+	io.Writer
+}
+
+func (b *bDatCloser) Write(p []byte) (n int, err error) {
+	pLen := len(p)
+	if pLen > 0 {
+		cmd := fmt.Sprintf("BDAT %d\r\n", pLen)
+		_, err = b.Writer.Write([]byte(cmd))
+		if err != nil {
+			return 0, err
+		}
+		return b.Writer.Write(p)
+	}
+	return
+}
+
+func (b *bDatCloser) Close() error {
+	_, _, err := b.c.cmd(250, "BDAT 0 LAST\r\n")
+	return err
+}
+
 // data issues a DATA command to the server and returns a writer that
 // can be used to write the mail headers and body. The caller should
 // close the writer before calling any more methods on c. A call to
@@ -288,18 +318,8 @@ func (c *smtpClient) data() (io.WriteCloser, error) {
 // The caller should send bdat with size 0 this close send message before
 // calling any more methods in c. A call to Bdat must be preceded by one
 // or more call to Rcpt.
-func (c *smtpClient) bdat(size int, last bool) (io.Writer, error) {
-	var err error
-	if last {
-		_, _, err = c.cmd(250, "BDAT %d LAST", size)
-	} else {
-		_, err = fmt.Fprintf(c.text.W, "BDAT %d\r\n", size)
-	}
-
-	if err != nil {
-		return nil, err
-	}
-	return c.text.W, nil
+func (c *smtpClient) bdat() io.WriteCloser {
+	return &bDatCloser{c, c.text.RawWriter()}
 }
 
 // extension reports whether an extension is support by the server.

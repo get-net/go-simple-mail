@@ -66,6 +66,7 @@ func newMessage(email *Email) *message {
 		message.openMultipart("alternative")
 	}
 
+	message.writeBody([]byte("\r\n"), EncodingNone)
 	for _, part := range email.parts {
 		message.addBody(part.contentType, part.body.Bytes())
 	}
@@ -138,11 +139,12 @@ func (msg *message) openMultipart(multipartType string) {
 	header.Set("Content-Type", contentType)
 
 	// if no existing parts, add header to main header group
-	if msg.parts != 0 {
+	if msg.parts == 0 {
+		msg.write(header, nil, EncodingQuotedPrintable)
+	} else {
 		msg.writers[msg.parts-1].CreatePart(header)
 	}
 
-	msg.write(header, nil, EncodingQuotedPrintable)
 	msg.parts++
 }
 
@@ -365,9 +367,33 @@ func (msg *message) ReadFile(p []byte, index int, inline bool) (n int, err error
 	}
 }
 
+func (msg *message) GetSize() int64 {
+
+	// calc estimate size of
+	bodyLength := msg.body.Len()
+	var fileSize int64
+	for _, file := range msg.attachments {
+		fileSize += file.size
+		bodyLength += len(file.filename)*2 + len(file.mimeType) + 116
+	}
+	for _, file := range msg.inlines {
+		fileSize += file.size
+		bodyLength += len(file.filename)*2 + len(file.mimeType) + 148
+	}
+	if msg.parts > 0 {
+		bodyLength += (len(msg.writers[0].Boundary()) + 4) * int(msg.parts+1) * 2
+	}
+	if msg.encoding != EncodingNone {
+		fileSize = fileSize / 100 * 136
+	}
+	return int64(bodyLength) + fileSize
+}
+
 func (msg *message) Read(p []byte) (n int, err error) {
 	var nBody int
-
+	if len(p) == 0 {
+		return 0, errors.New("buffer should be greater than 0")
+	}
 	if !msg.bodySend {
 		nBody, err = msg.body.Read(p)
 		if err != nil && err != io.EOF {
