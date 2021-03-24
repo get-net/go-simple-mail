@@ -66,7 +66,7 @@ func newMessage(email *Email) *message {
 		message.openMultipart("alternative")
 	}
 
-	message.writeBody([]byte("\r\n"), EncodingNone)
+	//message.writeBody([]byte("\r\n"), EncodingNone)
 	for _, part := range email.parts {
 		message.addBody(part.contentType, part.body.Bytes())
 	}
@@ -325,6 +325,7 @@ func (msg *message) AddFileHeaders(index int, inline bool) error {
 			encodeHeader(escapeQuotes(files[index].filename), msg.charset, 10, limit)+`"`)
 	}
 	msg.write(header, nil, EncodingQuotedPrintable)
+	msg.write(nil, []byte("\r\n"), EncodingNone)
 	return nil
 }
 
