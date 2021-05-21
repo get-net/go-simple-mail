@@ -273,6 +273,9 @@ func (msg *message) addFiles(files []*file, inline bool) {
 		header.Set("Content-Type", file.mimeType+"; name=\""+encodeHeader(escapeQuotes(file.filename),
 			msg.charset, 6, limit)+`"`)
 		header.Set("Content-Transfer-Encoding", encoding.string())
+		if file.size > 0 {
+			header.Set("Content-Length", strconv.FormatInt(file.size, 10))
+		}
 
 		if inline {
 			header.Set("Content-Disposition", "inline; filename=\""+encodeHeader(escapeQuotes(file.filename),
