@@ -300,13 +300,13 @@ func (msg *message) AddFileHeaders(index int, inline bool) error {
 
 	encoding := EncodingBase64
 	limit := false
-	if msg.encoding == EncodingNone {
-		encoding = EncodingNone
-	}
-
-	if msg.encoding == EncodingBase64 {
-		limit = true
-	}
+	//if msg.encoding == EncodingNone {
+	//	encoding = EncodingNone
+	//}
+	//
+	//if msg.encoding == EncodingBase64 {
+	//	limit = true
+	//}
 
 	if inline {
 		files = msg.inlines
