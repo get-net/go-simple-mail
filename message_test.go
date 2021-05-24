@@ -19,6 +19,7 @@ func TestMessageWriter(t *testing.T) {
 	email.AddTo("test@gmail.com")
 	email.AddAttachment("10.enc.mp3", "application/octet-stream", "FNS_1GN-IP-ZAICEV_5902_de0978f9b9e611ebb485574d8d9a55b9_01_01_01.zip")
 	//email.AddAttachment("email_test.go")
+
 	email.SetBody(TextPlain, "just test\r\n")
 	email.Encoding = EncodingNone
 
