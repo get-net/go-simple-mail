@@ -320,6 +320,8 @@ func (msg *message) AddFileHeaders(index int, inline bool) error {
 	header := make(textproto.MIMEHeader)
 	header.Set("Content-Type", files[index].mimeType+"; name=\""+
 		encodeHeader(escapeQuotes(files[index].filename), msg.charset, 6, limit)+`"`)
+	println("Content-Type", files[index].mimeType+"; name=\""+
+		encodeHeader(escapeQuotes(files[index].filename), msg.charset, 6, limit)+`"`)
 	header.Set("Content-Transfer-Encoding", encoding.string())
 
 	if files[index].size > 0 {
