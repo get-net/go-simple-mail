@@ -299,9 +299,10 @@ func (msg *message) AddFileHeaders(index int, inline bool) error {
 	var files []*file
 
 	encoding := EncodingBase64
-	limit := false
+	limit := true
 	//if msg.encoding == EncodingNone {
 	//	encoding = EncodingNone
+	//	limit :=
 	//}
 	//
 	//if msg.encoding == EncodingBase64 {
