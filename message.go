@@ -300,14 +300,10 @@ func (msg *message) AddFileHeaders(index int, inline bool) error {
 
 	encoding := EncodingBase64
 	limit := true
-	//if msg.encoding == EncodingNone {
-	//	encoding = EncodingNone
-	//	limit :=
-	//}
-	//
-	//if msg.encoding == EncodingBase64 {
-	//	limit = true
-	//}
+	if msg.encoding == EncodingNone {
+		encoding = EncodingNone
+		limit = false
+	}
 
 	if inline {
 		files = msg.inlines
@@ -320,8 +316,6 @@ func (msg *message) AddFileHeaders(index int, inline bool) error {
 
 	header := make(textproto.MIMEHeader)
 	header.Set("Content-Type", files[index].mimeType+"; name=\""+
-		encodeHeader(escapeQuotes(files[index].filename), msg.charset, 6, limit)+`"`)
-	println("Content-Type", files[index].mimeType+"; name=\""+
 		encodeHeader(escapeQuotes(files[index].filename), msg.charset, 6, limit)+`"`)
 	header.Set("Content-Transfer-Encoding", encoding.string())
 
