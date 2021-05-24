@@ -20,10 +20,10 @@ func TestMessageWriter(t *testing.T) {
 	email.AddAttachment("10.enc.mp3", "application/octet-stream", "FNS_1GN-IP-ZAICEV_5902_de0978f9b9e611ebb485574d8d9a55b9_01_01_01.zip")
 	//email.AddAttachment("email_test.go")
 
-	email.SetBody(TextPlain, "just test\r\n")
+	//email.SetBody(TextPlain, "just test\r\n")
 	email.Encoding = EncodingNone
 
-	email.AddAttachmentBase64("dGVzdCBiYXJvdHJhdW1hCg==", "NO_NDFL6_5902_5902_5902174276590201001_20200506_29d5b070-828f-4f7e-afe3-3bf8dd75034d.xml")
+	//email.AddAttachmentBase64("dGVzdCBiYXJvdHJhdW1hCg==", "NO_NDFL6_5902_5902_5902174276590201001_20200506_29d5b070-828f-4f7e-afe3-3bf8dd75034d.xml")
 
 	msg := newMessage(email)
 

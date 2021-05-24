@@ -331,7 +331,7 @@ func (msg *message) AddFileHeaders(index int, inline bool) error {
 		header.Set("Content-Disposition", "attachment; filename=\""+
 			encodeHeader(escapeQuotes(files[index].filename), msg.charset, 10, limit)+`"`)
 	}
-	msg.write(header, nil, EncodingQuotedPrintable)
+	msg.write(header, []byte("\n"), EncodingQuotedPrintable)
 	return nil
 }
 
