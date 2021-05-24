@@ -15,7 +15,6 @@ import (
 )
 
 type message struct {
-	offset          int
 	bodySend        bool
 	fileHeaderSend  bool
 	body            *bytes.Buffer
@@ -43,7 +42,6 @@ func newMessage(email *Email) *message {
 		inlines:         email.inlines,
 		bodySend:        false,
 		fileHeaderSend:  false,
-		offset:          0,
 		body:            new(bytes.Buffer),
 	}
 
@@ -301,10 +299,13 @@ func (msg *message) AddFileHeaders(index int, inline bool) error {
 	var files []*file
 
 	encoding := EncodingBase64
-	limit := true
+	limit := false
 	if msg.encoding == EncodingNone {
 		encoding = EncodingNone
-		limit = false
+	}
+
+	if msg.encoding == EncodingBase64 {
+		limit = true
 	}
 
 	if inline {
