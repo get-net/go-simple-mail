@@ -15,6 +15,7 @@ import (
 )
 
 type message struct {
+	offset          int
 	bodySend        bool
 	fileHeaderSend  bool
 	body            *bytes.Buffer
@@ -42,6 +43,7 @@ func newMessage(email *Email) *message {
 		inlines:         email.inlines,
 		bodySend:        false,
 		fileHeaderSend:  false,
+		offset:          0,
 		body:            new(bytes.Buffer),
 	}
 
@@ -319,6 +321,10 @@ func (msg *message) AddFileHeaders(index int, inline bool) error {
 		encodeHeader(escapeQuotes(files[index].filename), msg.charset, 6, limit)+`"`)
 	header.Set("Content-Transfer-Encoding", encoding.string())
 
+	if files[index].size > 0 {
+		header.Set("Content-Length", strconv.FormatInt(files[index].size, 10))
+	}
+
 	if inline {
 		header.Set("Content-Disposition", "inline; filename=\""+
 			encodeHeader(escapeQuotes(files[index].filename), msg.charset, 10, limit)+`"`)
@@ -394,80 +400,86 @@ func (msg *message) GetSize() int64 {
 
 func (msg *message) Read(p []byte) (n int, err error) {
 	var nBody int
-	if len(p) == 0 {
+	offset := 0
+
+	lenP := len(p)
+	if lenP == 0 {
 		return 0, errors.New("buffer should be greater than 0")
 	}
-	if !msg.bodySend {
-		nBody, err = msg.body.Read(p)
-		if err != nil && err != io.EOF {
-			return nBody, err
+
+	for {
+		if !msg.bodySend {
+			nBody, err = msg.body.Read(p[offset:])
+			offset = offset + nBody
+			if (err != nil && err != io.EOF) || nBody == lenP {
+				break
+			}
 		}
-	}
-	if err == io.EOF {
-		if len(msg.attachments) == msg.attachmentIndex && len(msg.inlines) == msg.inlineIndex {
-			msg.bodySend = false
-		} else {
+
+		if err == io.EOF {
 			msg.bodySend = true
-			return nBody, nil
 		}
+
+		if msg.bodySend && len(msg.attachments) == msg.attachmentIndex && len(msg.inlines) == msg.inlineIndex {
+			break
+		}
+
+		if msg.bodySend {
+			if len(msg.attachments) > 0 && len(msg.attachments) > msg.attachmentIndex {
+				if !msg.fileHeaderSend {
+					msg.AddFileHeaders(msg.attachmentIndex, false)
+					msg.fileHeaderSend = true
+					msg.bodySend = false
+					continue
+				}
+				n, err = msg.ReadFile(p[offset:], msg.attachmentIndex, false)
+				offset = offset + n
+				if offset == lenP || (err != nil && err != io.EOF) {
+					break
+				}
+				if err == io.EOF {
+					msg.attachmentIndex++
+					if len(msg.attachments) > msg.attachmentIndex {
+						msg.fileHeaderSend = false
+						continue
+					} else {
+						msg.closeMultipart()
+						msg.bodySend = false
+						continue
+					}
+				}
+			}
+			if len(msg.inlines) > 0 && len(msg.inlines) > msg.inlineIndex {
+				if !msg.fileHeaderSend {
+					msg.AddFileHeaders(msg.inlineIndex, true)
+					msg.fileHeaderSend = true
+					msg.bodySend = false
+					continue
+				}
+				n, err = msg.ReadFile(p[offset:], msg.inlineIndex, true)
+				offset = offset + n
+				if offset == lenP || (err != nil && err != io.EOF) {
+					break
+				}
+				if err == io.EOF {
+					msg.inlineIndex++
+					if len(msg.inlines) > msg.inlineIndex {
+						msg.fileHeaderSend = false
+						continue
+					} else {
+						msg.closeMultipart()
+						msg.bodySend = false
+						continue
+					}
+
+				}
+			}
+		}
+		if offset == lenP {
+			break
+		}
+
 	}
 
-	if msg.bodySend {
-		if len(msg.attachments) > 0 && len(msg.attachments) > msg.attachmentIndex {
-			if !msg.fileHeaderSend {
-				msg.AddFileHeaders(msg.attachmentIndex, false)
-				nBody, err = msg.body.Read(p)
-				msg.fileHeaderSend = true
-				if err != io.EOF {
-					msg.bodySend = false
-				}
-				if err != nil && err != io.EOF {
-					return nBody, err
-				}
-				return nBody, nil
-			}
-			n, err = msg.ReadFile(p, msg.attachmentIndex, false)
-			if err == io.EOF {
-				msg.attachmentIndex++
-				if len(msg.attachments) > msg.attachmentIndex {
-					msg.fileHeaderSend = false
-				} else {
-					msg.closeMultipart()
-					msg.bodySend = false
-					return n, nil
-				}
-
-			}
-			return n, nil
-		}
-		if len(msg.inlines) > 0 && len(msg.inlines) > msg.inlineIndex {
-			if !msg.fileHeaderSend {
-				msg.AddFileHeaders(msg.inlineIndex, true)
-				nBody, err = msg.body.Read(p)
-				msg.fileHeaderSend = true
-				if err != io.EOF {
-					msg.bodySend = false
-				}
-				if err != nil && err != io.EOF {
-					return nBody, err
-				}
-				return nBody, nil
-			}
-			n, err = msg.ReadFile(p, msg.inlineIndex, true)
-			if err == io.EOF {
-				msg.inlineIndex++
-				if len(msg.inlines) > msg.inlineIndex {
-					msg.fileHeaderSend = false
-				} else {
-					msg.closeMultipart()
-					msg.bodySend = false
-					return n, nil
-				}
-
-			}
-			return n, nil
-		}
-	}
-
-	return nBody, err
+	return offset, err
 }
