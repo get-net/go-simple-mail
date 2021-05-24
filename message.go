@@ -377,7 +377,7 @@ func (msg *message) ReadFile(p []byte, index int, inline bool) (n int, err error
 func (msg *message) GetSize() int64 {
 
 	// calc estimate size of
-	bodyLength := msg.body.Len()
+	bodyLength := msg.body.Len() * 2
 	var fileSize int64
 	for _, file := range msg.attachments {
 		fileSize += file.size
