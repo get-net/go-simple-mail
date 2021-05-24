@@ -17,7 +17,7 @@ func TestMessageWriter(t *testing.T) {
 	email.SetFrom("test@gmail.com")
 	email.SetSubject("test")
 	email.AddTo("test@gmail.com")
-	email.AddAttachment("10.enc.mp3")
+	email.AddAttachment("10.enc.mp3", "application/octet-stream")
 	//email.AddAttachment("email_test.go")
 	email.SetBody(TextPlain, "just test\r\n")
 	email.Encoding = EncodingNone

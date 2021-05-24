@@ -534,7 +534,7 @@ func (email *Email) AddAlternative(contentType contentType, body string) *Email 
 
 // AddAttachment allows you to add an attachment to the email message.
 // You can optionally provide a different name for the file.
-func (email *Email) AddAttachment(file string, name ...string) *Email {
+func (email *Email) AddAttachment(file string, mimeType string, name ...string) *Email {
 	if email.Error != nil {
 		return email
 	}
@@ -544,7 +544,7 @@ func (email *Email) AddAttachment(file string, name ...string) *Email {
 		return email
 	}
 
-	email.Error = email.attach(file, false, name...)
+	email.Error = email.attach(file, false, mimeType, name...)
 
 	return email
 }
@@ -589,7 +589,7 @@ func (email *Email) AddInline(file string, name ...string) *Email {
 		return email
 	}
 
-	email.Error = email.attach(file, true, name...)
+	email.Error = email.attach(file, true, "", name...)
 
 	return email
 }
@@ -606,7 +606,7 @@ func (email *Email) AddInlineData(data []byte, filename, mimeType string) *Email
 }
 
 // attach does the low level attaching of the files
-func (email *Email) attach(f string, inline bool, name ...string) error {
+func (email *Email) attach(f string, inline bool, mimeType string, name ...string) error {
 
 	// Get the file data
 	reader, err := os.Open(f)
@@ -620,9 +620,11 @@ func (email *Email) attach(f string, inline bool, name ...string) error {
 	}
 
 	// get the file mime type
-	mimeType := mime.TypeByExtension(filepath.Ext(f))
 	if mimeType == "" {
-		mimeType = "application/octet-stream"
+		mimeType = mime.TypeByExtension(filepath.Ext(f))
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
 	}
 
 	// get the filename
